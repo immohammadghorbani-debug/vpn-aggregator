@@ -3,6 +3,9 @@ import json
 import urllib.parse as up
 
 
+FINGERPRINTS = {"chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized"}
+
+
 def _b64(s):
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode("utf-8", "ignore")
 
@@ -22,11 +25,12 @@ def _tls(sni, security, q, insecure=True):
     if security not in ("tls", "reality"):
         return None
     t = {"enabled": True, "server_name": sni or "", "insecure": insecure}
-    if q.get("fp"):
+    if q.get("fp") in FINGERPRINTS:
         t["utls"] = {"enabled": True, "fingerprint": q["fp"]}
     if q.get("alpn"):
         t["alpn"] = q["alpn"].split(",")
     if security == "reality":
+        t.setdefault("utls", {"enabled": True, "fingerprint": "chrome"})
         t["reality"] = {"enabled": True, "public_key": q.get("pbk", ""), "short_id": q.get("sid", "")}
         t["insecure"] = False
     return t

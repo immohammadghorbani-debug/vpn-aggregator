@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -48,19 +49,34 @@ def real_test(items, batch=150):
     results = []
     for i in range(0, len(items), batch):
         chunk = items[i:i + batch]
-        cfg = {"log": {"level": "error"}, "inbounds": [], "outbounds": [{"type": "direct", "tag": "direct"}],
-               "route": {"rules": [], "final": "direct"}}
-        for n, (_, o) in enumerate(chunk):
-            tag_in = f"in{n}"
-            cfg["inbounds"].append({"type": "socks", "tag": tag_in, "listen": "127.0.0.1", "listen_port": BASE_PORT + n})
-            cfg["outbounds"].append(o)
-            cfg["route"]["rules"].append({"inbound": [tag_in], "outbound": o["tag"]})
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump(cfg, f)
-        p = subprocess.Popen(["sing-box", "run", "-c", f.name], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        time.sleep(2)
-        if p.poll() is not None:
-            print("[warn] sing-box failed:", p.stderr.read().decode()[:300])
+        p = None
+        while chunk:
+            cfg = {"log": {"level": "error"}, "inbounds": [], "outbounds": [{"type": "direct", "tag": "direct"}],
+                   "route": {"rules": [], "final": "direct"}}
+            for n, (_, o) in enumerate(chunk):
+                tag_in = f"in{n}"
+                cfg["inbounds"].append({"type": "socks", "tag": tag_in, "listen": "127.0.0.1", "listen_port": BASE_PORT + n})
+                cfg["outbounds"].append(o)
+                cfg["route"]["rules"].append({"inbound": [tag_in], "outbound": o["tag"]})
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump(cfg, f)
+            p = subprocess.Popen(["sing-box", "run", "-c", f.name], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            for _ in range(20):
+                time.sleep(0.1)
+                if p.poll() is not None:
+                    break
+            else:
+                time.sleep(1)
+            if p.poll() is None:
+                break
+            err = p.stderr.read().decode()
+            m = re.search(r"outbound\[(\d+)\]", err)
+            if not m:
+                print("[warn] sing-box failed:", err[:200])
+                p = None
+                break
+            del chunk[int(m.group(1)) - 1]  # outbound[0] is the direct one
+        if p is None or not chunk:
             continue
         try:
             with ThreadPoolExecutor(50) as ex:
